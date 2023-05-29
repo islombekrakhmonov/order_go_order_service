@@ -12,6 +12,7 @@ import (
 type Store struct {
 	db       *pgxpool.Pool
 	order    storage.OrderRepoI
+	product storage.ProductRepoI
 }
 
 func NewConnectPostgresql(cfg *config.Config) (storage.StorageI, error) {
@@ -48,4 +49,12 @@ func (s *Store) Order() storage.OrderRepoI {
 	}
 
 	return s.order
+}
+
+func (s *Store) Product() storage.ProductRepoI {
+	if s.product == nil {
+		s.product = NewProductRepo(s.db)
+	}
+
+	return s.product
 }

@@ -2,9 +2,10 @@ package postgres
 
 import (
 	"context"
-	"log"
 	"order_service/genproto/order_service"
+	"order_service/pkg/helper"
 	"os/exec"
+	"strings"
 
 	"github.com/jackc/pgx/v4/pgxpool"
 )
@@ -21,44 +22,53 @@ func NewOrderRepo(db *pgxpool.Pool) *orderRepo {
 
 func (o *orderRepo) Create(ctx context.Context, order *order_service.CreateOrderRequest) (*order_service.OrderPKey, error){
 	query := `
-		INSERT INTO orders (user_id, product_id)
-		VALUES ($1, $2)
+		INSERT INTO orders (id, user_id, product_id, totalsum)
+		VALUES ($1, $2, $3, $4)
 		`
-	
-	newUUID, err := exec.Command("uuidgen").Output()
-	if err != nil {
-        log.Fatal(err)
-    }
-	newUUID2, err := exec.Command("uuidgen").Output()
-	if err != nil {
-        log.Fatal(err)
-    }
+		// Generate a UUID from the byte array.
+		newUUID, err := exec.Command("uuidgen").Output()
+		if err != nil {
+			return nil, err
+		}
+		uuid := strings.TrimSpace(string(newUUID))
 
-	_, err = o.db.Exec(ctx, query, newUUID, newUUID2)
+
+
+	_, err = o.db.Exec(ctx, query, 
+		uuid, 
+		order.UserID, 
+		order.ProductID, 
+		order.TotalSum)
 	if err != nil {
 		return nil, err
 	}
-	return nil, nil
+	return &order_service.OrderPKey{Id:uuid}, nil
 }
 
-func (o *orderRepo) Get(ctx context.Context, pKey *order_service.OrderPKey) (resp *order_service.Order, err error) {
+func (o *orderRepo) GetById(ctx context.Context, pKey *order_service.OrderPKey) (resp *order_service.Order, err error) {
 	var (
 		query string
-		order order_service.Order
 	)
+	resp = &order_service.Order{}
+
 
 	query = `
-		SELECT id, user_id, product_id
+		SELECT id, user_id, product_id, totalsum
 		FROM orders
 		WHERE id = $1
 	`
-	err = o.db.QueryRow(ctx, query, pKey.Id).Scan(&order.Id, &order.UserID, &order.ProductID,
+
+	err = o.db.QueryRow(ctx, query, pKey.Id).Scan(
+		&resp.Id, 
+		&resp.UserID, 
+		&resp.ProductID,
+		&resp.TotalSum,
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	return &order, nil
+	return resp, nil
 }
 
 func (o *orderRepo) GetAll(ctx context.Context, req *order_service.GetAllOrdersRequest) (resp *order_service.GetAllOrdersResponse, err error) {
@@ -71,7 +81,7 @@ func (o *orderRepo) GetAll(ctx context.Context, req *order_service.GetAllOrdersR
 	)
 
 	query = `
-		SELECT id, user_id, product_id
+		SELECT id, user_id, product_id, totalsum
 		FROM orders
 	`
 
@@ -85,13 +95,14 @@ func (o *orderRepo) GetAll(ctx context.Context, req *order_service.GetAllOrdersR
 
 	for rows.Next() {
 		var order order_service.Order
-		err = rows.Scan(&order.Id, &order.UserID, &order.ProductID)
+		err = rows.Scan(&order.Id, &order.UserID, &order.ProductID, &order.TotalSum)
 		if err != nil {
 			return nil, err
 		}
 		resp.Orders = append(resp.Orders, &order)
 	}
-	return nil, nil
+	resp.Count = int64(len(resp.Orders))
+	return resp, nil
 }
 
 func (o *orderRepo) Delete(ctx context.Context, pKey *order_service.OrderPKey) (err error) {
@@ -102,9 +113,42 @@ func (o *orderRepo) Delete(ctx context.Context, pKey *order_service.OrderPKey) (
 		WHERE id = $1
 	`
 	_,err = o.db.Exec(ctx, query, pKey.Id)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
-func (o *orderRepo) Update(ctx context.Context, pKey *order_service.OrderPKey) (err error) {
-	return nil
+func (o *orderRepo) Update(ctx context.Context, req *order_service.UpdateOrderRequest) (err error) {
+	var (
+		query  string
+		params map[string]interface{}
+	)
+
+	query = `
+		UPDATE
+		staffs
+		SET
+			id = :id, 
+			user_id = :user_id,
+			product_id = :product_id,
+			total_sum = :total_sum,
+		WHERE id = :id
+	`
+	params = map[string]interface{}{
+		"id":    req.Id,
+		"name":  req.UserID,
+		"price": req.ProductID,
+		"total_sum": req.TotalSum,
+	}
+
+	query, args := helper.ReplaceQueryParams(query, params)
+
+	_, err = o.db.Exec(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+
+	return 
 }
